@@ -14,6 +14,10 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  # GitHub flips actions to Node 24 on 2026-06-16; opt in now so it can't surprise us
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
