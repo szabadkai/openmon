@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>OPENMON</title>
+</head>
+<body>
+<div id="gbc">
+  <div id="bezel">
+    <div class="top"><div id="power"></div><span>GAME BOY <i>COLOR</i></span></div>
+    <div id="screenwrap"><canvas id="screen" width="160" height="160"></canvas></div>
+  </div>
+  <div id="brand">Nintendo&nbsp;<b>GAME BOY</b><span style="font-size:8px;vertical-align:super;">COLOR</span></div>
+  <div id="controls">
+    <div id="dpad">
+      <button class="dbtn" id="d-up"    data-k="up">▲</button>
+      <button class="dbtn" id="d-left"  data-k="left">◀</button>
+      <button class="dbtn" id="d-mid"></button>
+      <button class="dbtn" id="d-right" data-k="right">▶</button>
+      <button class="dbtn" id="d-down"  data-k="down">▼</button>
+    </div>
+    <div id="ab">
+      <button class="ab" id="b-b" data-k="b">B</button>
+      <button class="ab" id="b-a" data-k="a">A</button>
+    </div>
+  </div>
+  <div id="pills">
+    <button class="pill" data-k="start">SELECT</button>
+    <button class="pill" data-k="start">START</button>
+  </div>
+  <div id="hint">ARROWS/WASD move &nbsp;·&nbsp; Z=A &nbsp;·&nbsp; X=B &nbsp;·&nbsp; ENTER=START</div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
