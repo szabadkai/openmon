@@ -742,9 +742,30 @@ function getAC(){
       return AC.createPeriodicWave(re,im);
     });
   }
-  if(AC.state==='suspended') AC.resume();
+  if(AC.state!=='running') AC.resume();   // 'suspended' or iOS 'interrupted'
   return AC;
 }
+// iOS unlock: the context must be created/resumed inside a user gesture, and a
+// looping silent <audio> flips the session to 'playback' so WebAudio stays
+// audible even with the ringer switch on silent.
+let unlocked=false, unlockEl=null;
+function unlockAudio(){
+  interacted = true;
+  try{ getAC(); }catch(e){}
+  if(unlocked) return;
+  unlocked = true;
+  try{
+    const wav = new Uint8Array([82,73,70,70,40,0,0,0,87,65,86,69,102,109,116,32,16,0,0,0,
+      1,0,1,0,64,31,0,0,64,31,0,0,1,0,8,0,100,97,116,97,4,0,0,0,128,128,128,128]);
+    unlockEl = document.createElement('audio');
+    unlockEl.src = URL.createObjectURL(new Blob([wav],{type:'audio/wav'}));
+    unlockEl.loop = true; unlockEl.setAttribute('playsinline','');
+    unlockEl.play().catch(()=>{ unlocked=false; });   // retry on the next gesture
+  }catch(e){}
+}
+addEventListener('pointerdown', unlockAudio);
+addEventListener('keydown', unlockAudio);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && AC) AC.resume(); });
 function tone(f,dur,vol,t,wave){            // music voice: wave 0-2 = duty, 3 = triangle
   const o=AC.createOscillator(), g=AC.createGain();
   if(wave<3) o.setPeriodicWave(DUTY[wave]); else o.type='triangle';
@@ -932,7 +953,6 @@ const KEYMAP = {
   z:'a', ' ':'a', x:'b', backspace:'b', enter:'start', shift:'start', m:'sel',
 };
 addEventListener('keydown', e=>{
-  interacted = true;
   const k = KEYMAP[e.key.toLowerCase()];
   if(!k) return;
   e.preventDefault();
@@ -946,7 +966,7 @@ addEventListener('keyup', e=>{
 // on-screen buttons
 document.querySelectorAll('[data-k]').forEach(btn=>{
   const k = btn.dataset.k;
-  const dn = e=>{ e.preventDefault(); interacted=true; if(!held[k]) pressed[k]=true; held[k]=true; btn.classList.add('held'); };
+  const dn = e=>{ e.preventDefault(); if(!held[k]) pressed[k]=true; held[k]=true; btn.classList.add('held'); };
   const up = e=>{ e.preventDefault(); held[k]=false; btn.classList.remove('held'); };
   btn.addEventListener('pointerdown', dn);
   btn.addEventListener('pointerup', up);
