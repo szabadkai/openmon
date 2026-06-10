@@ -1460,9 +1460,19 @@ function tick(){
   }
   if(music.muted) drawText('MUTE', 138, 3, '#e83030');
   for(const k in pressed) pressed[k]=false;
-  requestAnimationFrame(tick);
 }
-tick();
+
+// fixed 60Hz logic, decoupled from the display refresh rate (120Hz+ phones/Macs)
+const STEP = 1000/60;
+let acc = 0, lastTs = 0;
+function frameLoop(ts){
+  if(!lastTs) lastTs = ts;
+  acc += Math.min(Math.max(ts - lastTs, 0), 250);   // clamp long gaps (backgrounded tab)
+  lastTs = ts;
+  while(acc >= STEP){ tick(); acc -= STEP; }
+  requestAnimationFrame(frameLoop);
+}
+requestAnimationFrame(frameLoop);
 
 // tiny hook so automated checks can reach module state (also handy in devtools)
 window.__om = {
@@ -1475,7 +1485,7 @@ window.__om = {
   healAll(){ player.party.forEach(m=>m.hp=m.maxhp); },
   tickN(n){ for(let i=0;i<n;i++) tick(); },
   MAP, tileAt, solid, passable, npcAt, HOME, cleared, makeMon,
-  music, TRACKS, toggleMute,
+  music, TRACKS, toggleMute, frameLoop, frames: ()=>frame,
   trackCheck: ()=>Object.entries(TRACKS).map(([k,t])=>
     k+' '+[t.p1,t.p2,t.bs].map(s=>parseCh(s).reduce((a,e)=>a+e.d,0)).join('/')+'/'+(t.dr||'').length),
 };
