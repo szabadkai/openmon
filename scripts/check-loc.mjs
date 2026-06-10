@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 // 1100 -> 1300 (2026-06-10): story update — 60x50 map, NPCs, boss, multi-page dialogs
 // 1300 -> 1500 (2026-06-10): full quest — 90x70 world, party/EXP/evolve, trainers, skills
-const LIMIT = 1500;
+// 1500 -> 1800 (2026-06-10): GBC sound — chiptune sequencer, 11 tracks, SFX kit, mute
+const LIMIT = 1800;
 
 const files = ['index.html'];
 const walk = dir => {

@@ -35,7 +35,17 @@ Progress auto-saves to localStorage on every step.
 | B (cancel) | X / Backspace |
 | START (team menu) | Enter |
 
-The on-screen shell buttons work too (touch-friendly).
+The on-screen shell buttons work too (touch-friendly). **M** or SELECT toggles sound.
+
+## Sound
+
+All audio is synthesized live in WebAudio, mirroring the Game Boy's 4-channel
+APU: two pulse waves with real duty cycles (12.5/25/50%, built as Fourier
+series), a triangle "wave" channel for bass, and 15-bit LFSR noise for drums —
+no samples, no files. A tiny sequencer plays 11 tracks: per-region themes
+(title, village, meadows, highlands, deepwood, crag, isle), three battle themes
+(wild / trainer / boss), and a victory fanfare, plus a full SFX kit (text
+ticks, ball throw, level-up, evolution, cut/smash, hits) on the same channels.
 
 ## Development
 

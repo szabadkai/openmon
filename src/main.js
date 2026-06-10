@@ -519,7 +519,8 @@ function gainExp(m, amt, msgs){
   while(m.exp >= expNext(m.lv)){
     m.exp -= expNext(m.lv); m.lv++;
     const ev = EVOLVE[m.name];
-    if(ev && m.lv >= ev[1]){ msgs.push(`WHAT? ${m.name} IS EVOLVING INTO ${ev[0]}!`); m.name = ev[0]; }
+    if(ev && m.lv >= ev[1]){ msgs.push(`WHAT? ${m.name} IS EVOLVING INTO ${ev[0]}!`); m.name = ev[0]; sfx.evolve(); }
+    else sfx.lvl();
     applyLevel(m);
     msgs.push(`${m.name} GREW TO LV${m.lv}!`);
   }
@@ -721,40 +722,217 @@ const NPCS = [
 ];
 const npcAt = (x,y)=>NPCS.find(n=>!(n.gone&&n.gone()) && n.x===x && n.y===y);
 
-// ---------- audio (tiny GB-ish blips) ----------
-let AC=null;
+// ---------- audio: GBC-style sound — 2 pulse + wave(tri) + LFSR noise ----------
+let AC=null, master=null, noiseB=null, DUTY=null, interacted=false;
+function getAC(){
+  if(!AC){
+    AC = new (window.AudioContext||window.webkitAudioContext)();
+    master = AC.createGain();
+    master.gain.value = music.muted ? 0 : 0.5;
+    master.connect(AC.destination);
+    // 15-bit LFSR noise, like the GB noise channel
+    const n=32768, b=AC.createBuffer(1,n,AC.sampleRate), d=b.getChannelData(0);
+    let l=0x7FFF;
+    for(let i=0;i<n;i++){ const bit=(l^(l>>1))&1; l=(l>>1)|(bit<<14); d[i]=(l&1)?0.5:-0.5; }
+    noiseB=b;
+    // pulse duty cycles 12.5% / 25% / 50% as Fourier series
+    DUTY=[0.125,0.25,0.5].map(dy=>{
+      const N=64, re=new Float32Array(N), im=new Float32Array(N);
+      for(let i=1;i<N;i++) im[i]=2/(i*Math.PI)*Math.sin(Math.PI*i*dy);
+      return AC.createPeriodicWave(re,im);
+    });
+  }
+  if(AC.state==='suspended') AC.resume();
+  return AC;
+}
+function tone(f,dur,vol,t,wave){            // music voice: wave 0-2 = duty, 3 = triangle
+  const o=AC.createOscillator(), g=AC.createGain();
+  if(wave<3) o.setPeriodicWave(DUTY[wave]); else o.type='triangle';
+  o.frequency.value=f;
+  g.gain.setValueAtTime(vol,t);
+  g.gain.linearRampToValueAtTime(vol*0.4, t+dur*0.85);
+  g.gain.linearRampToValueAtTime(0.001, t+dur);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t+dur);
+}
+function noise(rate,dur,vol,t){
+  try{
+    const ctx=getAC(); t=t??ctx.currentTime;
+    const s=ctx.createBufferSource(); s.buffer=noiseB; s.loop=true; s.playbackRate.value=rate;
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    s.connect(g); g.connect(master); s.start(t); s.stop(t+dur);
+  }catch(e){}
+}
 function beep(freq=880, dur=0.06, type='square', vol=0.04, slide=0){
   try{
-    AC = AC || new (window.AudioContext||window.webkitAudioContext)();
-    if(AC.state==='suspended') AC.resume();
-    const o=AC.createOscillator(), g=AC.createGain();
+    const ctx=getAC();
+    const o=ctx.createOscillator(), g=ctx.createGain();
     o.type=type; o.frequency.value=freq;
-    if(slide) o.frequency.linearRampToValueAtTime(freq+slide, AC.currentTime+dur);
-    g.gain.value=vol; g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+dur);
-    o.connect(g); g.connect(AC.destination);
-    o.start(); o.stop(AC.currentTime+dur);
+    if(slide) o.frequency.linearRampToValueAtTime(freq+slide, ctx.currentTime+dur);
+    g.gain.value=vol; g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+dur);
+    o.connect(g); g.connect(master);
+    o.start(); o.stop(ctx.currentTime+dur);
   }catch(e){}
 }
 const sfx = {
   a:    ()=>beep(980,0.05),
   b:    ()=>beep(540,0.05),
+  tick: ()=>beep(1240,0.012,'square',0.012),
   bump: ()=>beep(140,0.06,'square',0.03),
-  hit:  ()=>beep(220,0.12,'sawtooth',0.05,-120),
+  hit:  ()=>{ beep(220,0.12,'sawtooth',0.05,-120); noise(1.4,0.08,0.04); },
   enc:  ()=>{ beep(660,0.1,'square',0.04,300); setTimeout(()=>beep(880,0.12,'square',0.04,300),100); },
   heal: ()=>{ beep(660,0.08); setTimeout(()=>beep(880,0.08),90); setTimeout(()=>beep(1100,0.1),180); },
   faint:()=>beep(300,0.4,'sawtooth',0.05,-220),
+  throw:()=>{ beep(420,0.14,'square',0.04,320); noise(2,0.05,0.02); },
   catch:()=>{ beep(500,0.08); setTimeout(()=>beep(750,0.08),100); setTimeout(()=>beep(1000,0.15),200); },
-  chop: ()=>beep(180,0.1,'square',0.06,-60),
+  lvl:  ()=>{ beep(660,0.06); setTimeout(()=>beep(880,0.06),70); setTimeout(()=>beep(1320,0.1),140); },
+  evolve:()=>[440,554,659,880,1108].forEach((f,i)=>setTimeout(()=>beep(f,0.09,'square',0.045),i*90)),
+  chop: ()=>{ noise(0.5,0.15,0.07); beep(120,0.12,'square',0.05,-40); },
 };
+
+// ---------- chiptune sequencer: lead 25% duty, harmony 50%, triangle bass, noise drums ----------
+const NSEM={c:0,cs:1,d:2,ds:3,e:4,f:5,fs:6,g:7,gs:8,a:9,as:10,b:11};
+const parseCh = s => s.trim().split(/\s+/).map(tok=>{
+  const [n,d]=tok.split(':');
+  const m=n.match(/^([a-g]s?)(\d)$/);
+  return {f: m ? 440*2**((NSEM[m[1]]+12*(+m[2]+1)-69)/12) : 0, d:+(d||2)};
+});
+const OFF=(a,b)=>`r:2 ${a}:2 r:2 ${b}:2 r:2 ${a}:2 r:2 ${b}:2`;       // off-beat stabs (1 bar)
+const ARP=(a,b,c)=>`${a}:2 ${b}:2 ${c}:2 ${b}:2 ${a}:2 ${b}:2 ${c}:2 ${b}:2`;
+const RUMB=(a,b)=>`${a}:2 ${b}:2 ${a}:2 ${b}:2 ${a}:2 ${b}:2 ${a}:2 ${b}:2`;
+const TRACKS = {
+  title:{bpm:112,
+    p1:"c5:6 e5:2 g5:4 e5:4 a5:6 g5:2 e5:4 c5:4 f5:6 g5:2 a5:4 f5:4 g5:8 d5:4 b4:4 c5:6 e5:2 g5:4 a5:4 b5:4 a5:4 g5:4 e5:4 f5:4 a5:4 g5:4 d5:4 c5:12 r:4",
+    p2:[OFF('e4','g4'),OFF('e4','a4'),OFF('f4','a4'),OFF('d4','g4'),OFF('e4','g4'),OFF('e4','a4'),"r:2 f4:2 r:2 a4:2 r:2 d4:2 r:2 g4:2",OFF('e4','g4')].join(' '),
+    bs:"c3:4 c3:2 c3:2 g2:4 c3:4 a2:4 a2:2 a2:2 e2:4 a2:4 f2:4 f2:2 f2:2 c3:4 f2:4 g2:4 g2:2 g2:2 d3:4 g2:4 c3:4 c3:2 c3:2 g2:4 c3:4 a2:4 a2:2 a2:2 e2:4 a2:4 f2:4 f2:2 f2:2 g2:4 g2:4 c3:4 g2:4 c3:8",
+    dr:'k.h.s.h.k.h.s.h.'.repeat(7)+'k.h.s.h.k.k.s.hh'},
+  village:{bpm:92,
+    p1:"a4:4 g4:2 a4:2 c5:4 a4:4 as4:4 a4:2 g4:2 f4:8 e4:4 f4:2 g4:2 a4:4 g4:4 f4:12 r:4",
+    p2:[ARP('f3','a3','c4'),ARP('f3','as3','d4'),ARP('e3','g3','c4'),ARP('f3','a3','c4')].join(' '),
+    bs:"f2:8 c3:8 as2:8 f2:8 c3:8 g2:8 f2:8 c3:8",
+    dr:'k...h...s...h...'.repeat(4)},
+  field:{bpm:120,
+    p1:"g4:2 c5:2 e5:2 g5:2 e5:4 c5:4 a4:2 b4:2 d5:2 g5:2 d5:4 b4:4 a4:2 c5:2 e5:2 a5:2 e5:4 c5:4 a4:2 c5:2 f5:2 a5:2 g5:8 g4:2 c5:2 e5:2 g5:2 e5:4 c5:4 b4:2 d5:2 g5:2 b5:2 a5:4 g5:4 a5:4 e5:4 f5:4 c5:4 d5:4 b4:4 g4:8",
+    p2:[OFF('e4','g4'),OFF('d4','b3'),OFF('c4','e4'),OFF('c4','f4'),OFF('e4','g4'),OFF('d4','b3'),"r:2 c4:2 r:2 e4:2 r:2 c4:2 r:2 f4:2",OFF('b3','d4')].join(' '),
+    bs:"c3:4 g2:4 c3:4 g2:4 g2:4 d3:4 g2:4 d3:4 a2:4 e3:4 a2:4 e3:4 f2:4 c3:4 f2:4 c3:4 c3:4 g2:4 c3:4 g2:4 g2:4 d3:4 g2:4 d3:4 a2:4 e3:4 f2:4 c3:4 g2:4 d3:4 g2:8",
+    dr:'k.h.s.h.k.h.s.h.'.repeat(8)},
+  high:{bpm:100,
+    p1:"a4:8 c5:4 e5:4 f5:8 e5:4 c5:4 e5:8 d5:4 c5:4 b4:12 r:4",
+    p2:[ARP('a3','c4','e4'),ARP('a3','c4','f4'),ARP('g3','c4','e4'),ARP('gs3','b3','e4')].join(' '),
+    bs:"a2:16 f2:16 c3:16 e2:16",
+    dr:'h...h...h...h...'.repeat(4)},
+  wood:{bpm:108,
+    p1:"d5:2 r:2 f5:2 r:2 a5:2 r:2 f5:2 r:2 c5:2 r:2 e5:2 r:2 g5:2 r:2 e5:2 r:2 as4:2 r:2 d5:2 r:2 f5:2 r:2 d5:2 r:2 a4:2 cs5:2 e5:2 cs5:2 a4:4 r:4",
+    p2:[OFF('d4','a3'),OFF('c4','g3'),OFF('as3','f3'),"r:2 a3:2 r:2 e3:2 r:2 cs4:2 r:2 e3:2"].join(' '),
+    bs:"d3:4 d3:2 d3:2 a2:4 d3:4 c3:4 c3:2 c3:2 g2:4 c3:4 as2:4 as2:2 as2:2 f2:4 as2:4 a2:4 a2:2 a2:2 e2:4 a2:4",
+    dr:'k.hks.h.k.hks.h.'.repeat(4)},
+  crag:{bpm:96,
+    p1:"e4:4 g4:2 e4:2 b4:4 g4:4 a4:4 c5:2 a4:2 e5:4 c5:4 g4:4 b4:2 g4:2 c5:4 b4:4 fs4:4 ds4:2 fs4:2 b3:8",
+    p2:[RUMB('e3','e3'),RUMB('a3','a3'),RUMB('c4','c4'),RUMB('b3','b3')].join(' '),
+    bs:"e2:8 e2:8 a2:8 a2:8 c3:8 c3:8 b2:8 b2:8",
+    dr:'k.k.s..kk.k.s..h'.repeat(4)},
+  isle:{bpm:84,
+    p1:"d5:8 a4:8 as4:6 a4:2 f4:8 gs4:8 r:4 a4:4 d4:12 r:4",
+    p2:"d4:4 f4:4 a4:4 f4:4 as3:4 d4:4 f4:4 d4:4 gs3:4 b3:4 d4:4 b3:4 a3:4 cs4:4 e4:4 cs4:4",
+    bs:"d2:16 as1:16 e2:16 a1:16",
+    dr:'....h.......s...'.repeat(4)},
+  wild:{bpm:150,
+    p1:"a4:2 a4:2 c5:2 a4:2 e5:2 a4:2 c5:2 a4:2 g4:2 g4:2 b4:2 g4:2 d5:2 g4:2 b4:2 g4:2 f4:2 f4:2 a4:2 f4:2 c5:2 f4:2 a4:2 f4:2 e4:2 e4:2 gs4:2 e4:2 b4:2 e4:2 gs4:2 b4:2 a5:4 g5:2 a5:2 e5:4 c5:4 d5:4 e5:2 d5:2 b4:4 g4:4 c5:4 d5:2 c5:2 a4:4 f4:4 gs4:4 b4:4 e5:4 b4:2 gs4:2",
+    p2:[OFF('a3','a3'),OFF('g3','g3'),OFF('f3','f3'),OFF('e3','e3'),"a3:2 a3:2 c4:2 a3:2 e4:2 a3:2 c4:2 a3:2","g3:2 g3:2 b3:2 g3:2 d4:2 g3:2 b3:2 g3:2","f3:2 f3:2 a3:2 f3:2 c4:2 f3:2 a3:2 f3:2","e3:2 e3:2 gs3:2 e3:2 b3:2 e3:2 gs3:2 b3:2"].join(' '),
+    bs:[RUMB('a2','a2'),RUMB('g2','g2'),RUMB('f2','f2'),RUMB('e2','e2'),RUMB('a2','a2'),RUMB('g2','g2'),RUMB('f2','f2'),RUMB('e2','e2')].join(' '),
+    dr:'k.h.s.h.k.h.s.hh'.repeat(8)},
+  trainer:{bpm:160,
+    p1:"e4:2 r:2 e4:2 g4:2 b4:2 r:2 g4:2 b4:2 c5:2 r:2 c5:2 g4:2 e5:2 r:2 c5:2 g4:2 d5:2 r:2 d5:2 a4:2 fs5:2 r:2 d5:2 a4:2 b4:2 ds5:2 fs5:2 b5:2 a5:2 fs5:2 ds5:2 b4:2 g5:4 fs5:2 g5:2 e5:4 b4:4 a5:4 g5:2 a5:2 e5:4 c5:4 fs5:4 e5:2 fs5:2 d5:4 a4:4 ds5:4 fs5:4 b4:4 ds5:2 fs5:2",
+    p2:[OFF('e3','b3'),OFF('c4','g3'),OFF('d4','a3'),OFF('b3','fs3'),RUMB('e3','e3'),RUMB('a3','a3'),RUMB('d4','d4'),RUMB('b3','b3')].join(' '),
+    bs:[RUMB('e2','e2'),RUMB('c3','c3'),RUMB('d3','d3'),RUMB('b2','b2'),RUMB('e2','e2'),RUMB('a2','a2'),RUMB('d3','d3'),RUMB('b2','b2')].join(' '),
+    dr:'k.hks.h.k.hks.hh'.repeat(8)},
+  boss:{bpm:140,
+    p1:"a4:2 r:2 a4:2 ds5:4 d5:2 c5:2 a4:2 a4:2 r:2 a4:2 e5:4 ds5:2 d5:2 b4:2 f5:4 e5:2 d5:2 ds5:4 d5:2 c5:2 e5:8 b4:4 gs4:4",
+    p2:[RUMB('a3','a3'),RUMB('a3','a3'),RUMB('f3','f3'),RUMB('e3','e3')].join(' '),
+    bs:[RUMB('a2','e2'),RUMB('a2','e2'),RUMB('f2','c2'),RUMB('e2','b1')].join(' '),
+    dr:'kkh.s..kk.h.s..h'.repeat(4)},
+  win:{bpm:140, loop:false,
+    p1:"c5:2 e5:2 g5:2 c6:4 g5:2 c6:8",
+    p2:"e4:2 g4:2 c5:2 e5:4 c5:2 e5:8",
+    bs:"c3:4 g3:4 c4:8 r:4",
+    dr:'k.s.k.s.kk..........'},
+};
+const music = {id:null, muted:false, ev:null, idx:[0,0,0], time:[0,0,0], drI:0, drT:0, step:0, until:0, loop:true};
+try{ music.muted = localStorage.getItem('openmon.mute')==='1'; }catch(e){}
+const VOICE = [[1,0.045],[2,0.028],[3,0.07]];      // [duty/wave, volume] per channel
+function playMusic(id){
+  const tr = TRACKS[id]; if(!tr) return;
+  tr._ev = tr._ev || [parseCh(tr.p1), parseCh(tr.p2), parseCh(tr.bs)];
+  music.id=id; music.ev=tr._ev; music.step=60/tr.bpm/4; music.loop = tr.loop!==false;
+  const t = getAC().currentTime + 0.06;
+  music.idx=[0,0,0]; music.time=[t,t,t]; music.drI=0; music.drT=t;
+  music.until = music.loop ? 0 : t + Math.max(...tr._ev.map(ev=>ev.reduce((a,e)=>a+e.d,0)))*music.step;
+}
+function pump(){                                    // schedule ~0.2s ahead, called every frame
+  if(!music.id || !AC || music.muted) return;
+  const tr = TRACKS[music.id], ahead = AC.currentTime + 0.2;
+  for(let c=0;c<3;c++){
+    const ev = music.ev[c];
+    while(music.time[c] < ahead){
+      const e = ev[music.idx[c]], dur = e.d*music.step;
+      if(e.f) tone(e.f, dur, VOICE[c][1], music.time[c], VOICE[c][0]);
+      music.time[c] += dur;
+      if(++music.idx[c] >= ev.length){ music.idx[c]=0; if(!music.loop){ music.time[c]=Infinity; break; } }
+    }
+  }
+  const dr = tr.dr||'';
+  while(dr && music.drT < ahead){
+    const ch = dr[music.drI];
+    if(ch==='k') noise(0.22,0.10,0.05,music.drT);
+    else if(ch==='s') noise(0.9,0.07,0.04,music.drT);
+    else if(ch==='h') noise(2.4,0.03,0.02,music.drT);
+    music.drT += music.step;
+    if(++music.drI >= dr.length){ music.drI=0; if(!music.loop){ music.drT=Infinity; break; } }
+  }
+}
+function ensureMusic(id){
+  if(!interacted) return;
+  if(AC && AC.currentTime < music.until) return;    // let jingles finish
+  if(id === music.id) return;
+  if(music.muted){ music.id=id; return; }
+  playMusic(id);
+}
+function toggleMute(){
+  music.muted = !music.muted;
+  try{ localStorage.setItem('openmon.mute', music.muted?'1':'0'); }catch(e){}
+  if(master) master.gain.value = music.muted ? 0 : 0.5;
+  music.until = 0;
+  if(!music.muted && music.id) playMusic(music.id);
+}
+function areaMusic(){
+  const x=player.tx, y=player.ty;
+  if(x>=18 && x<=45 && y>=54) return 'village';
+  if(y<27 && x>55) return 'isle';
+  if(y>26 && x>58) return 'crag';
+  if(x<18 && y>29) return 'wood';
+  if(y<30) return 'high';
+  return 'field';
+}
+function desiredMusic(){
+  if(state==='title') return 'title';
+  const pb = pendingBattle;
+  if(pb) return pb.boss?'boss':pb.trainer?'trainer':'wild';
+  if(state==='battle' && battle)
+    return battle.won ? areaMusic() : battle.boss?'boss':battle.trainer?'trainer':'wild';
+  return areaMusic();
+}
+function playWin(){ if(interacted && !music.muted) playMusic('win'); }
 
 // ---------- input ----------
 const held = {}, pressed = {};
 const KEYMAP = {
   arrowup:'up', w:'up', arrowdown:'down', s:'down',
   arrowleft:'left', a:'left', arrowright:'right', d:'right',
-  z:'a', ' ':'a', x:'b', backspace:'b', enter:'start', shift:'start',
+  z:'a', ' ':'a', x:'b', backspace:'b', enter:'start', shift:'start', m:'sel',
 };
 addEventListener('keydown', e=>{
+  interacted = true;
   const k = KEYMAP[e.key.toLowerCase()];
   if(!k) return;
   e.preventDefault();
@@ -768,7 +946,7 @@ addEventListener('keyup', e=>{
 // on-screen buttons
 document.querySelectorAll('[data-k]').forEach(btn=>{
   const k = btn.dataset.k;
-  const dn = e=>{ e.preventDefault(); if(!held[k]) pressed[k]=true; held[k]=true; btn.classList.add('held'); };
+  const dn = e=>{ e.preventDefault(); interacted=true; if(!held[k]) pressed[k]=true; held[k]=true; btn.classList.add('held'); };
   const up = e=>{ e.preventDefault(); held[k]=false; btn.classList.remove('held'); };
   btn.addEventListener('pointerdown', dn);
   btn.addEventListener('pointerup', up);
@@ -937,6 +1115,7 @@ function foeTurn(after){
 }
 function winFoe(){
   sfx.faint();
+  if(!(battle.trainer && battle.idx+1 < battle.troupe.length)){ battle.won=true; playWin(); }
   const msgs = [ battle.trainer ? `${battle.trainer}'S ${battle.foe.name} FAINTED!`
                                 : `WILD ${battle.foe.name} FAINTED!` ];
   gainExp(battle.you, battle.foe.lv*((battle.trainer||battle.boss)?9:6), msgs);
@@ -960,9 +1139,10 @@ function battleMenuAct(){
   } else if(pick==='BALL'){
     if(battle.trainer){ bmsg(`YOU CAN'T CATCH A TAMER'S MON!`, ()=>foeTurn(()=>{ battle.phase='menu'; })); return; }
     const chance = (0.25 + 0.65*(1 - battle.foe.hp/battle.foe.maxhp)) * (battle.boss ? 0.6 : 1);
+    sfx.throw();
     bmsg(`YOU THREW A MON BALL!`, ()=>{
       if(rnd() < chance){
-        sfx.catch(); player.caught++;
+        sfx.catch(); player.caught++; battle.won=true; playWin();
         const m = battle.foe;
         const msgs = [`GOTCHA! ${m.name} WAS CAUGHT!`];
         if(player.party.length<6){ player.party.push(m); msgs.push(`${m.name} JOINED YOUR TEAM!`); }
@@ -1030,7 +1210,7 @@ function updateWorld(){
   if(dialog){
     const lines = dialog.pages[dialog.page];
     const total = lines.reduce((a,l)=>a+l.length,0);
-    if(dialog.shown < total) dialog.shown += 1.5;
+    if(dialog.shown < total){ dialog.shown += 1.5; if((frame&7)===0) sfx.tick(); }
     if(take('a')||take('b')){
       if(dialog.shown < total) dialog.shown = total;
       else {
@@ -1183,7 +1363,7 @@ function updateBattle(){
     const m = battle.queue[0];
     if(!m){ battle.phase='menu'; return; }
     const total = m.lines.reduce((a,l)=>a+l.length,0);
-    if(m.shown < total) m.shown += 1.6;
+    if(m.shown < total){ m.shown += 1.6; if((frame&7)===0) sfx.tick(); }
     if(take('a')||take('b')){
       if(m.shown<total) m.shown=total;
       else { battle.queue.shift(); sfx.a(); if(m.then) m.then(); }
@@ -1251,6 +1431,9 @@ function drawTitle(){
 // ---------- main loop ----------
 function tick(){
   frame++;
+  ensureMusic(desiredMusic());
+  pump();
+  if(take('sel')) toggleMute();
   if(state==='title'){
     drawTitle();
     const nOpts = hasSave ? 2 : 1;
@@ -1275,6 +1458,7 @@ function tick(){
     updateBattle();
     if(battle) drawBattle();
   }
+  if(music.muted) drawText('MUTE', 138, 3, '#e83030');
   for(const k in pressed) pressed[k]=false;
   requestAnimationFrame(tick);
 }
@@ -1291,4 +1475,7 @@ window.__om = {
   healAll(){ player.party.forEach(m=>m.hp=m.maxhp); },
   tickN(n){ for(let i=0;i<n;i++) tick(); },
   MAP, tileAt, solid, passable, npcAt, HOME, cleared, makeMon,
+  music, TRACKS, toggleMute,
+  trackCheck: ()=>Object.entries(TRACKS).map(([k,t])=>
+    k+' '+[t.p1,t.p2,t.bs].map(s=>parseCh(s).reduce((a,e)=>a+e.d,0)).join('/')+'/'+(t.dr||'').length),
 };
