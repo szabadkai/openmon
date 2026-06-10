@@ -3,7 +3,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const LIMIT = 1100;
+// 1100 -> 1300 (2026-06-10): story update — 60x50 map, NPCs, boss, multi-page dialogs
+// 1300 -> 1500 (2026-06-10): full quest — 90x70 world, party/EXP/evolve, trainers, skills
+const LIMIT = 1500;
 
 const files = ['index.html'];
 const walk = dir => {
