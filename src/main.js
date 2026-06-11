@@ -265,7 +265,7 @@ const P_DOWN0 = spr([
   "....ppp..ppp....",
   "...bbb....bbb...",
 ], PPAL);
-const P_DOWN1 = spr([
+const P_DOWN1 = spr([            // stride: left foot plants forward, right lifts, arm swings
   "....h..hh..h....",
   "...hhhhhhhhhh...",
   "..hhhhhhhhhhhh..",
@@ -276,12 +276,12 @@ const P_DOWN1 = spr([
   "....ssssssss....",
   "....jjjjjjjj....",
   "..jjjjjwwjjjjj..",
-  "..ssjjjwwjjjss..",
+  "..ssjjjwwjjjj...",
   "....jjjwwjjj....",
   "....JJJJJJJJ....",
-  ".....pppppp.....",
-  "....bbbppp......",
-  "....bbb.bbb.....",
+  "....ppp..ppp....",
+  "....ppp...bbb...",
+  "...bbb..........",
 ], PPAL);
 const P_UP0 = spr([
   "....h..hh..h....",
@@ -301,7 +301,7 @@ const P_UP0 = spr([
   "....ppp..ppp....",
   "...bbb....bbb...",
 ], PPAL);
-const P_UP1 = spr([
+const P_UP1 = spr([              // stride, seen from behind
   "....h..hh..h....",
   "...hhhhhhhhhh...",
   "..hhhhhhhhhhhh..",
@@ -312,51 +312,78 @@ const P_UP1 = spr([
   "....ssssssss....",
   "....jjjjjjjj....",
   "..jjjbbbbbbjjj..",
-  "..ssjbbbbbbjss..",
+  "..ssjbbbbbbj....",
   "....jbbbbbbj....",
   "....JJJJJJJJ....",
-  ".....pppppp.....",
-  "......pppbbb....",
-  ".....bbb.bbb....",
+  "....ppp..ppp....",
+  "....ppp...bbb...",
+  "...bbb..........",
 ], PPAL);
-const P_SIDE0 = spr([            // faces LEFT; flipped for right
-  "....h..hh..h....",
-  "...hhhhhhhhhh...",
+const P_SIDE0 = spr([            // profile, faces LEFT (flipped at draw for right):
+  "....hh.hh.h.....",             // hair swept back, one eye, sleeve, satchel behind
+  "...hhhhhhhhh....",
+  "..hhhhhhhhhhh...",
   "..hhhhhhhhhhhh..",
-  "..hhhhhhhhhhhh..",
-  "..hssssssshhhh..",
-  "..sskssssshhh...",
-  "...sssssssshh...",
-  "....ssssssss....",
-  "....jjjjjjjj....",
-  "...jjjjjjjjjb...",
-  "...ssjjjjjjjb...",
-  "....jjjjjjjj....",
+  "..ssssssshhhhh..",
+  "..sskssssshhhh..",
+  ".ssssssssshhh...",
+  "...ssssssss.....",
+  "....jjjjjjjjb...",
+  "...jjJJjjjjjbb..",
+  "...jjJJjjjjjbb..",
+  "...jjssjjjjjb...",
   "....JJJJJJJJ....",
-  "....pppppp......",
   "....ppp.ppp.....",
-  "...bbb..bbb.....",
+  "....ppp.ppp.....",
+  "...bbb...bbb....",
 ], PPAL);
-const P_SIDE1 = spr([
-  "....h..hh..h....",
-  "...hhhhhhhhhh...",
+const P_SIDE1 = spr([            // stride open: legs scissor, arm swings forward
+  "....hh.hh.h.....",
+  "...hhhhhhhhh....",
+  "..hhhhhhhhhhh...",
   "..hhhhhhhhhhhh..",
-  "..hhhhhhhhhhhh..",
-  "..hssssssshhhh..",
-  "..sskssssshhh...",
-  "...sssssssshh...",
-  "....ssssssss....",
-  "....jjjjjjjj....",
-  "...jjjjjjjjjb...",
-  "...ssjjjjjjjb...",
-  "....jjjjjjjj....",
+  "..ssssssshhhhh..",
+  "..sskssssshhhh..",
+  ".ssssssssshhh...",
+  "...ssssssss.....",
+  "....jjjjjjjjb...",
+  "..jjJJjjjjjjbb..",
+  "..jjJJjjjjjjbb..",
+  "..jjssjjjjjjb...",
   "....JJJJJJJJ....",
-  "...ppp..ppp.....",
-  "..bbb....ppp....",
-  ".........bbb....",
+  "...ppp...ppp....",
+  "..ppp.....ppp...",
+  "..bbb......bbb..",
 ], PPAL);
+const P_SIDE2 = spr([            // stride passing: legs gather under the body
+  "....hh.hh.h.....",
+  "...hhhhhhhhh....",
+  "..hhhhhhhhhhh...",
+  "..hhhhhhhhhhhh..",
+  "..ssssssshhhhh..",
+  "..sskssssshhhh..",
+  ".ssssssssshhh...",
+  "...ssssssss.....",
+  "....jjjjjjjjb...",
+  "...jjJJjjjjjbb..",
+  "...jjJJjjjjjbb..",
+  "...jjssjjjjjb...",
+  "....JJJJJJJJ....",
+  "....ppp.ppp.....",
+  ".....pppppp.....",
+  "....bbbbbb......",
+], PPAL);
+function flipH(img){
+  const c=document.createElement('canvas'); c.width=c.height=16;
+  const g=c.getContext('2d'); g.translate(16,0); g.scale(-1,1); g.drawImage(img,0,0);
+  return c;
+}
+// classic GB 4-phase gait: step, stand, mirrored step, stand
 const PLAYER_SPR = {
-  down:[P_DOWN0,P_DOWN1], up:[P_UP0,P_UP1], left:[P_SIDE0,P_SIDE1], right:[P_SIDE0,P_SIDE1],
+  down: [P_DOWN0, P_DOWN1, P_DOWN0, flipH(P_DOWN1)],
+  up:   [P_UP0,   P_UP1,   P_UP0,   flipH(P_UP1)],
+  left: [P_SIDE0, P_SIDE1, P_SIDE0, P_SIDE2],
+  right:[P_SIDE0, P_SIDE1, P_SIDE0, P_SIDE2],
 };
 
 // ---------- monsters: shared pixel rows, evolutions are palette swaps ----------
@@ -1312,7 +1339,7 @@ function updateWorld(){
     const spd = 2;
     player.px += Math.sign(sx-player.px)*Math.min(spd, Math.abs(sx-player.px));
     player.py += Math.sign(sy-player.py)*Math.min(spd, Math.abs(sy-player.py));
-    player.step += 0.18;
+    player.step += 0.25;          // 2 gait phases per tile -> full stride every 2 tiles
     if(player.px===sx && player.py===sy){
       player.moving=false; player.tx=player.destx; player.ty=player.desty;
       save();
@@ -1341,7 +1368,7 @@ function drawWorld(){
     if(nx>-16 && nx<W && ny>-16 && ny<W) ctx.drawImage(n.img, nx, ny);
   }
   // player
-  const f = player.moving ? (Math.floor(player.step)&1) : 0;
+  const f = player.moving ? (Math.floor(player.step)%4) : 0;
   const img = PLAYER_SPR[player.dir][f];
   const dx = Math.round(player.px-camx), dy = Math.round(player.py-camy)-2;
   if(player.dir==='right'){
