@@ -335,9 +335,9 @@ const P_SIDE0 = spr([            // profile, faces LEFT (flipped at draw for rig
   "....JJJJJJJJ....",
   "....ppp.ppp.....",
   "....ppp.ppp.....",
-  "...bbb...bbb....",
+  "...bbb..bbb.....",
 ], PPAL);
-const P_SIDE1 = spr([            // stride open: legs scissor, arm swings forward
+const P_SIDE1 = spr([            // stride: front leg reaches, back leg trails, toes forward
   "....hh.hh.h.....",
   "...hhhhhhhhh....",
   "..hhhhhhhhhhh...",
@@ -351,9 +351,9 @@ const P_SIDE1 = spr([            // stride open: legs scissor, arm swings forwar
   "..jjJJjjjjjjbb..",
   "..jjssjjjjjjb...",
   "....JJJJJJJJ....",
-  "...ppp...ppp....",
-  "..ppp.....ppp...",
-  "..bbb......bbb..",
+  "...ppp..ppp.....",
+  "..ppp....ppp....",
+  ".bbb....bbb.....",
 ], PPAL);
 const P_SIDE2 = spr([            // stride passing: legs gather under the body
   "....hh.hh.h.....",
@@ -1010,7 +1010,7 @@ const player = {
   dir:'down', moving:false, step:0,
   party: [makeMon('EMBIT',5)],
   mon: null,                       // always === party[0]
-  caught: 0, boxed: 0, rest: null,
+  caught: 0, box: [], rest: null,  // box: stored mons, max 30
 };
 player.mon = player.party[0];
 function setLeader(i){
@@ -1027,7 +1027,7 @@ function save(){
   try{
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       tx:player.tx, ty:player.ty, dir:player.dir,
-      party:player.party, caught:player.caught, boxed:player.boxed,
+      party:player.party, box:player.box, caught:player.caught,
       rest:player.rest, story, skills, cleared:[...cleared],
     }));
     hasSave = true;
@@ -1037,16 +1037,20 @@ function load(){
   try{
     const d = JSON.parse(localStorage.getItem(SAVE_KEY));
     if(!d) return false;
-    const raw = d.party || (d.mon ? [d.mon] : []);
-    const party = raw.filter(m=>m && DEX[m.name]).map(m=>{
+    const fix = arr => (arr||[]).filter(m=>m && DEX[m.name]).map(m=>{
       const base = makeMon(m.name, Math.max(1, m.lv|0));
       base.hp = Math.max(0, Math.min(m.hp|0, base.maxhp));
       base.exp = Math.max(0, m.exp|0);
       return base;
     });
+    const party = fix(d.party || (d.mon ? [d.mon] : []));
     if(!party.length) return false;
     player.party = party.slice(0,6); player.mon = player.party[0];
-    player.caught = d.caught|0; player.boxed = d.boxed|0;
+    player.box = fix(d.box).slice(0,30);
+    if(!d.box && (d.boxed|0))      // legacy saves only counted boxed mons; conjure them
+      for(let i=0; i<Math.min(d.boxed|0,30); i++)
+        player.box.push(makeMon(i%2 ? 'DRIPPA' : 'SPRIGBY', 4+(i%5)));
+    player.caught = d.caught|0;
     player.rest = (d.rest && d.rest.tx!=null) ? d.rest : null;
     Object.assign(story, d.story||{}); Object.assign(skills, d.skills||{});
     cleared.clear(); for(const k of d.cleared||[]) cleared.add(String(k));
@@ -1064,7 +1068,7 @@ function newGame(){
   for(const k in story) story[k]=false;
   for(const k in skills) skills[k]=false;
   cleared.clear();
-  player.caught = 0; player.boxed = 0; player.rest = null;
+  player.caught = 0; player.box = []; player.rest = null;
   player.dir = 'down'; player.moving = false;
   player.tx = HOME.tx; player.ty = HOME.ty;
   player.px = player.tx*TILE; player.py = player.ty*TILE;
@@ -1193,7 +1197,8 @@ function battleMenuAct(){
         const m = battle.foe;
         const msgs = [`GOTCHA! ${m.name} WAS CAUGHT!`];
         if(player.party.length<6){ player.party.push(m); msgs.push(`${m.name} JOINED YOUR TEAM!`); }
-        else { player.boxed++; msgs.push(`${m.name} WAS SENT TO THE BOX.`); }
+        else if(player.box.length<30){ player.box.push(m); msgs.push(`${m.name} WAS SENT TO THE BOX.`); }
+        else msgs.push(`THE BOX IS FULL! ${m.name} WANDERED OFF...`);
         gainExp(battle.you, m.lv*4, msgs);
         chain(msgs, endBattle);
       } else {
@@ -1268,14 +1273,50 @@ function updateWorld(){
     return;
   }
   if(menu){
-    const n = player.party.length;
+    const list = menu.view==='box' ? player.box : player.party;
+    if(menu.act){
+      const opts = menu.view==='box' ? ['TAKE','FREE','BACK'] : ['LEAD','STORE','FREE','BACK'];
+      if(take('left')) { menu.act.sel=(menu.act.sel+opts.length-1)%opts.length; menu.act.confirm=false; menu.note=''; sfx.b(); }
+      if(take('right')){ menu.act.sel=(menu.act.sel+1)%opts.length; menu.act.confirm=false; menu.note=''; sfx.b(); }
+      if(take('b')||take('start')){ menu.act=null; menu.note=''; sfx.b(); return; }
+      if(take('a')){
+        sfx.a();
+        const pick = opts[menu.act.sel], m = list[menu.sel];
+        if(pick==='BACK') menu.act=null;
+        else if(pick==='LEAD'){ setLeader(menu.sel); menu.sel=0; menu.act=null; menu.note=`${m.name} LEADS!`; save(); }
+        else if(pick==='STORE'){
+          if(player.party.length<2) menu.note='KEEP AT LEAST ONE MON!';
+          else if(player.box.length>=30) menu.note='THE BOX IS FULL!';
+          else { player.box.push(player.party.splice(menu.sel,1)[0]); player.mon=player.party[0];
+                 menu.note=`${m.name} STORED.`; menu.act=null; save(); }
+        }
+        else if(pick==='TAKE'){
+          if(player.party.length>=6) menu.note='YOUR TEAM IS FULL!';
+          else { player.party.push(player.box.splice(menu.sel,1)[0]);
+                 menu.note=`${m.name} JOINS THE TEAM!`; menu.act=null; save(); }
+        }
+        else if(pick==='FREE'){
+          if(menu.view!=='box' && player.party.length<2) menu.note='KEEP AT LEAST ONE MON!';
+          else if(!menu.act.confirm){ menu.act.confirm=true; menu.note='PRESS A AGAIN TO SET FREE!'; }
+          else { list.splice(menu.sel,1); player.mon=player.party[0];
+                 menu.note=`${m.name} WAS SET FREE.`; menu.act=null; save(); }
+        }
+        menu.sel = Math.max(0, Math.min(menu.sel, list.length-1));
+      }
+      return;
+    }
+    const n = Math.max(1, list.length);
     if(take('up'))   { menu.sel=(menu.sel+n-1)%n; sfx.b(); }
     if(take('down')) { menu.sel=(menu.sel+1)%n; sfx.b(); }
+    if(take('left')||take('right')){
+      menu.view = menu.view==='box' ? 'team' : 'box';
+      menu.sel=0; menu.note=''; sfx.b();
+    }
     if(take('b')||take('start')){ menu=null; sfx.b(); return; }
-    if(take('a')){ sfx.a(); setLeader(menu.sel); menu.sel=0; save(); }
+    if(take('a') && list.length){ menu.act={sel:0,confirm:false}; menu.note=''; sfx.a(); }
     return;
   }
-  if(take('start')){ menu={sel:0}; sfx.a(); return; }
+  if(take('start')){ menu={view:'team', sel:0, act:null, note:''}; sfx.a(); return; }
   if(take('a')){
     const [fx,fy] = facingTile();
     const n = npcAt(fx,fy);
@@ -1381,21 +1422,36 @@ function drawWorld(){
     drawTextbox(lines, dialog.shown, dialog.shown>=total);
   }
   if(menu){
+    const inBox = menu.view==='box';
+    const list = inBox ? player.box : player.party;
     box(22,4,134,112);
-    drawText('TEAM', 30, 10, '#202038');
-    drawText('A:LEAD B:CLOSE', 88, 10, '#888898');
-    player.party.forEach((m,i)=>{
-      const y = 20+i*11;
-      if(menu.sel===i) drawText('>', 28, y, '#e83030');
-      drawText(`${m.name}`, 36, y, '#202038');
+    drawText('TEAM', 30, 10, inBox?'#a8a8b8':'#202038');
+    drawText(`BOX ${player.box.length}/30`, 56, 10, inBox?'#202038':'#a8a8b8');
+    drawText('B:CLOSE', 122, 10, '#888898');
+    const top = Math.max(0, Math.min(menu.sel-5, list.length-6));
+    for(let i=0; i<Math.min(6, list.length); i++){
+      const idx = top+i, m = list[idx], y = 20+i*11;
+      if(menu.sel===idx) drawText('>', 28, y, '#e83030');
+      drawText(m.name, 36, y, '#202038');
       drawText(`L${m.lv}`, 96, y, '#505060');
-      drawText(`${m.hp}/${m.maxhp}`, 114, y, m.hp>0?'#505060':'#e83030');
-    });
+      if(!inBox) drawText(`${m.hp}/${m.maxhp}`, 114, y, m.hp>0?'#505060':'#e83030');
+    }
+    if(!list.length) drawText('EMPTY', 36, 20, '#a8a8b8');
     ctx.fillStyle='#888898'; ctx.fillRect(28,88,122,1);
-    drawText(`CAUGHT ${player.caught}  BOX ${player.boxed}`, 30, 93, '#505060');
-    drawText('CUT', 30, 103, skills.cut?'#30a030':'#c8c8c8');
-    drawText('SMASH', 50, 103, skills.smash?'#30a030':'#c8c8c8');
-    drawText('SWIM', 80, 103, skills.swim?'#30a030':'#c8c8c8');
+    if(menu.act){
+      const opts = inBox ? ['TAKE','FREE','BACK'] : ['LEAD','STORE','FREE','BACK'];
+      let x = 30;
+      opts.forEach((o,i)=>{
+        drawText(o, x, 93, menu.act.sel===i?'#e83030':'#202038');
+        x += (o.length+2)*4;
+      });
+    } else {
+      drawText(`CAUGHT ${player.caught}`, 30, 93, '#505060');
+      drawText('CUT', 78, 93, skills.cut?'#30a030':'#c8c8c8');
+      drawText('SMASH', 96, 93, skills.smash?'#30a030':'#c8c8c8');
+      drawText('SWIM', 122, 93, skills.swim?'#30a030':'#c8c8c8');
+    }
+    drawText(menu.note || (menu.act ? 'A:OK B:BACK' : 'A:PICK  </> SWITCH PAGE'), 30, 103, '#888898');
   }
 }
 
@@ -1524,7 +1580,8 @@ requestAnimationFrame(frameLoop);
 // tiny hook so automated checks can reach module state (also handy in devtools)
 window.__om = {
   s: ()=>({state, pos:[player.tx,player.ty], dir:player.dir, battle, dialog, menu, pendingBattle,
-           story, skills, party:player.party, caught:player.caught, boxed:player.boxed, hasSave}),
+           story, skills, party:player.party, box:player.box, caught:player.caught, hasSave}),
+  boxMon(name,lv){ player.box.push(makeMon(name,lv)); },
   tp(x,y){ player.tx=x; player.ty=y; player.px=x*TILE; player.py=y*TILE; player.moving=false; },
   clearDialog(){ dialog=null; }, setSel(i){ if(battle) battle.sel=i; },
   setHp(h){ player.mon.hp=h; }, setFoeHp(h){ if(battle) battle.foe.hp=h; },

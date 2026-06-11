@@ -20,7 +20,9 @@ every region is gated a different way:
 | Isle of Mist | **Creature + skill** — show the hermit a WATER mon, then SWIM the fords |
 | The Spire | **Fight** — NOX, Keeper of Shadow, guards the ending |
 
-Catches join your six-mon team. Battles grant EXP; mons level, evolve
+Catches join your six-mon team; overflow lands in a 30-slot box. The START
+menu manages both pages (◀/▶ to switch): set the leader, store and withdraw
+mons, or set them free. Battles grant EXP; mons level, evolve
 (EMBIT→EMBLAZE, SPRIGBY→SPRIGOAK, DRIPPA→DRIPTIDE, ROCKO→ROCKLOPS), and step
 in automatically when the leader faints. Trainer battles forbid catching and
 running. Nap at any hut door to heal the team and set your respawn camp.
