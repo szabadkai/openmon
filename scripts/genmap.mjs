@@ -32,7 +32,7 @@ rect(31,48,58,48,'P');           // spur to crag crack
 rect(30,7,30,26,'P');            // highlands road
 rect(21,7,30,7,'P');             // shrine spur
 rect(21,6,21,6,'P');             // shrine approach
-rect(31,10,38,10,'P');           // hut spur (highlands)
+rect(31,11,39,11,'P');           // hut spur (highlands) — runs to the door FRONT, not into the wall
 
 // ---- gates ----
 put(16,52,'u'); put(17,52,'u');  // deepwood stumps (CUT)
@@ -47,11 +47,8 @@ rect(61,27,75,27,'G'); rect(70,19,70,21,'G');
 rect(20,4,22,4,'n'); rect(20,5,22,5,'n'); put(21,5,'e'); put(21,6,'P');
 rect(76,3,78,3,'n'); rect(76,4,78,4,'n'); put(77,4,'e'); put(77,5,'G');
 
-// ---- houses: [roofX0,roofX1,roofY,doorX] ----
+// ---- houses: [roofX0,roofX1,roofY,doorX] — stamped AFTER corridors so nothing carves them ----
 const HOUSES=[[24,26,58,25],[32,34,58,33],[38,40,9,39],[7,9,39,8],[65,67,43,66],[62,64,17,63]];
-for(const [x0,x1,y,dx] of HOUSES){
-  rect(x0,y,x1,y,'o'); rect(x0,y+1,x1,y+1,'h'); put(dx,y+1,'d');
-}
 
 // ---- lake in meadows ----
 rect(45,35,54,42,'A'); rect(46,34,53,34,'A'); rect(46,43,53,43,'A');
@@ -73,11 +70,18 @@ const NPCSPOTS=[[33,61],[29,62],[30,28],[5,33],[82,30],[70,26],[61,19]];
 for(const [x,y] of NPCSPOTS) protect(x-1,y-1,x+1,y+1);
 // corridors through dense regions
 const corridors=[
-  [2,52,15,52],[5,33,5,52],[2,33,8,33],[5,40,9,40],          // deepwood
-  [61,48,82,48],[82,30,82,48],[66,44,82,44],[70,28,70,48],   // crag
+  [2,52,15,52],[5,33,5,52],[2,33,8,33],[5,41,9,41],          // deepwood (hut corridor along door-front row y41)
+  [61,48,82,48],[82,30,82,48],[66,45,82,45],[70,28,70,48],   // crag (hut corridor along door-front row y45)
   [70,6,70,21],[70,6,77,6],[77,5,77,6],[63,19,70,19],        // isle
 ];
 for(const [x0,y0,x1,y1] of corridors){ rect(Math.min(x0,x1),Math.min(y0,y1),Math.max(x0,x1),Math.max(y0,y1),'G'); protect(Math.min(x0,x1),Math.min(y0,y1),Math.max(x0,x1),Math.max(y0,y1)); }
+
+// stamp houses now (nothing below this point overwrites non-grass tiles)
+for(const [x0,x1,y,dx] of HOUSES){
+  rect(x0,y,x1,y,'o'); rect(x0,y+1,x1,y+1,'h'); put(dx,y+1,'d');
+  if(at(dx,y+2)!=='G' && at(dx,y+2)!=='P') put(dx,y+2,'G');  // guarantee a clear door front
+  protect(x0,y,x1,y+2);
+}
 
 function sprinkle(x0,y0,x1,y1,ch,density){
   for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++)
@@ -168,6 +172,12 @@ for(let y=0;y<H;y++) for(let x=0;x<W;x++){
 checks.push(['stage4 full coverage', missing.length===0]);
 // NPC spots stand on walkable ground
 for(const [x,y] of NPCSPOTS) checks.push([`npc ${x},${y} on ${at(x,y)}`, 'GPb'.includes(at(x,y))]);
+// every house intact: o-roof, h d h wall, walkable door front
+for(const [x0,x1,y,dx] of HOUSES){
+  const intact = at(dx,y)==='o' && at(dx,y+1)==='d' && at(dx-1,y+1)==='h' && at(dx+1,y+1)==='h';
+  checks.push([`house@${dx},${y} intact (${at(dx-1,y+1)}${at(dx,y+1)}${at(dx+1,y+1)})`, intact]);
+  checks.push([`house@${dx},${y} front open (${at(dx,y+2)})`, 'GP'.includes(at(dx,y+2))]);
+}
 
 let fail=0;
 for(const [name,ok] of checks){ if(!ok) fail++; console.error((ok?'  ok ':'FAIL ')+name); }
